@@ -2,66 +2,30 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Dino Jump Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dino Jump - 随机障碍版</title>
     <style>
-        :root { --main-green: #2ecc71; --danger-red: #e74c3c; }
         body { 
             margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            height: 100vh; background-color: #1a1a1a; font-family: -apple-system, system-ui, sans-serif; 
-            color: white; overflow: hidden; touch-action: none; /* 临门一脚 2：禁用浏览器默认手势 */
+            height: 100vh; background-color: #1a1a1a; font-family: sans-serif; color: white; overflow: hidden; touch-action: none;
         }
-        
         #gameContainer { position: relative; width: 95vw; max-width: 800px; aspect-ratio: 8/3; }
-        canvas { 
-            background-color: #fff; width: 100%; height: 100%; border-bottom: 4px solid #444; 
-            border-radius: 8px; display: block; image-rendering: pixelated;
-        }
-        
-        /* UI 叠加层 */
-        .overlay { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            background: rgba(0,0,0,0.6); border-radius: 8px; z-index: 10;
-        }
-        #startBtn { 
-            padding: 12px 35px; font-size: 20px; font-weight: bold; color: white; 
-            background: var(--main-green); border: none; border-radius: 50px; cursor: pointer; 
-            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3); -webkit-tap-highlight-color: transparent;
-        }
-
-        /* 分数显示 */
-        .score-board { text-align: center; margin-bottom: 10px; width: 100%; }
-        #scoreDisplay { font-size: 32px; margin: 0; color: var(--main-green); font-weight: 800; }
-        #highScore { font-size: 14px; color: #888; margin: 0; }
-
-        .controls { margin-top: 15px; display: flex; gap: 10px; }
-        .upload-btn { background: #333; color: #ccc; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-size: 13px; border: 1px solid #444; }
+        canvas { background-color: #fff; width: 100%; height: 100%; border-radius: 8px; display: block; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .controls { margin-top: 20px; text-align: center; }
+        #scoreDisplay { font-size: 32px; color: #2ecc71; margin: 10px 0; font-weight: bold; }
+        .upload-label { background: #3498db; padding: 12px 20px; border-radius: 5px; cursor: pointer; display: inline-block; font-size: 14px; }
         #fileInput { display: none; }
-        
-        .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
-<div class="score-board">
-    <p id="highScore">最高分: 0</p>
-    <h1 id="scoreDisplay">0</h1>
-</div>
-
+<div id="scoreDisplay">0</div>
 <div id="gameContainer">
     <canvas id="gameCanvas"></canvas>
-    
-    <div id="uiOverlay" class="overlay">
-        <button id="startBtn">开始游戏</button>
-        <p style="font-size: 12px; margin-top: 10px; color: #aaa;">点击画面或按空格跳跃 (支持二段跳)</p>
-    </div>
 </div>
 
 <div class="controls">
-    <label for="fileInput" class="upload-btn">📷 更换角色图片</label>
+    <label for="fileInput" class="upload-label">📷 换个角色图片</label>
     <input type="file" id="fileInput" accept="image/*">
 </div>
 
@@ -69,88 +33,156 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreDisplay = document.getElementById('scoreDisplay');
-    const highScoreDisplay = document.getElementById('highScore');
-    const uiOverlay = document.getElementById('uiOverlay');
-    const startBtn = document.getElementById('startBtn');
     const fileInput = document.getElementById('fileInput');
 
-    // 逻辑分辨率保持 800x300，CSS 会自动伸缩适配手机屏幕
     canvas.width = 800;
     canvas.height = 300;
 
-    // --- 资源管理 ---
+    // --- 资源加载 ---
     let dinoImg = new Image();
     dinoImg.src = 'dino.png'; 
-    let highScore = localStorage.getItem('dinoHighScore') || 0;
-    highScoreDisplay.innerText = `最高分: ${Math.floor(highScore)}`;
 
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
-            reader.onload = (event) => { dinoImg.src = event.target.result; };
+            reader.onload = (ev) => { dinoImg.src = ev.target.result; };
             reader.readAsDataURL(file);
         }
     });
 
-    // --- 游戏状态 ---
-    let score = 0, gameSpeed = 6, gameState = 'WAITING', frame = 0;
+    // --- 游戏变量 ---
+    let score = 0, gameSpeed = 6, frame = 0, gameState = 'WAITING';
+    let nextObstacleFrame = 100; // 下一个障碍物出现的随机帧数
     const obstacles = [];
-    const dino = {
-        x: 80, y: 200, width: 55, height: 55,
-        dy: 0, jumpForce: 13, gravity: 0.8,
-        jumpCount: 0, maxJumps: 2
-    };
+    const dino = { x: 80, y: 200, width: 60, height: 60, dy: 0, jumpForce: 13, gravity: 0.8, jumpCount: 0, maxJumps: 2 };
 
-    // --- 核心逻辑 ---
+    // --- 核心交互逻辑 ---
+    function handleAction(e) {
+        if (e && e.code === 'Space') e.preventDefault();
+        if (e && e.type === 'touchstart') e.preventDefault();
 
-    function startGame() {
+        if (gameState === 'WAITING' || gameState === 'GAMEOVER') {
+            resetGame();
+        } else if (gameState === 'PLAYING') {
+            if (dino.jumpCount < dino.maxJumps) {
+                dino.dy = -dino.jumpForce;
+                dino.jumpCount++;
+            }
+        }
+    }
+
+    window.addEventListener('touchstart', handleAction, { passive: false });
+    window.addEventListener('mousedown', (e) => { if (e.button === 0) handleAction(e); });
+    window.addEventListener('keydown', (e) => { if (e.code === 'Space') handleAction(e); });
+
+    function resetGame() {
         score = 0; gameSpeed = 6; obstacles.length = 0;
         dino.y = 200; dino.dy = 0; dino.jumpCount = 0; frame = 0;
+        nextObstacleFrame = 60; 
         gameState = 'PLAYING';
-        uiOverlay.classList.add('hidden');
-        requestAnimationFrame(gameLoop);
     }
 
-    // 适配手机点击与键盘
-    startBtn.addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
-    window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space') {
-            e.preventDefault();
-            if (gameState === 'PLAYING') jump();
-            else if (gameState !== 'PLAYING') startGame();
-        }
-    });
-
-    // 手机触摸事件优化
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault(); // 防止双击缩放
-        if (gameState === 'PLAYING') jump();
-    }, { passive: false });
-
-    function jump() {
-        if (dino.jumpCount < dino.maxJumps) {
-            dino.dy = -dino.jumpForce;
-            dino.jumpCount++;
-        }
-    }
-
+    // --- 游戏更新逻辑 ---
     function update() {
+        if (gameState !== 'PLAYING') return;
         frame++;
         score += 0.15;
         scoreDisplay.innerText = Math.floor(score);
-        gameSpeed += 0.0015;
+        gameSpeed += 0.001; // 速度缓慢提升
 
+        // 恐龙重力模拟
         dino.dy += dino.gravity;
         dino.y += dino.dy;
 
+        // 落地碰撞
         if (dino.y + dino.height > canvas.height) {
             dino.y = canvas.height - dino.height;
             dino.dy = 0;
             dino.jumpCount = 0;
         }
 
-        // 障碍物生成逻辑 (随难度变快)
-        if (frame % Math.max(35, Math.floor(100 - gameSpeed * 2.5)) === 0) {
-            const h = 40 + Math.random() * 65;
-            obstacles.push({ x: canvas.width, y: canvas
+        // --- 随机生成逻辑 ---
+        if (frame >= nextObstacleFrame) {
+            // 随机高度：30px 到 100px 之间
+            const randomHeight = Math.floor(Math.random() * 70) + 30;
+            // 随机宽度：20px 到 40px 之间
+            const randomWidth = Math.floor(Math.random() * 20) + 20;
+            
+            obstacles.push({
+                x: canvas.width,
+                y: canvas.height - randomHeight,
+                w: randomWidth,
+                h: randomHeight,
+                color: '#e74c3c'
+            });
+
+            // 随机分布：生成下一个障碍物的间隔（受游戏速度影响，越来越快）
+            const minGap = Math.max(40, 90 - gameSpeed * 2);
+            const maxGap = Math.max(100, 180 - gameSpeed * 2);
+            nextObstacleFrame = frame + Math.floor(Math.random() * (maxGap - minGap)) + minGap;
+        }
+
+        // 移动与碰撞检测
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            obstacles[i].x -= gameSpeed;
+
+            // 精细碰撞检测 (为了公平，边缘留出 8px 的容错)
+            if (dino.x + 12 < obstacles[i].x + obstacles[i].w &&
+                dino.x + dino.width - 12 > obstacles[i].x &&
+                dino.y + 8 < obstacles[i].y + obstacles[i].h &&
+                dino.y + dino.height - 8 > obstacles[i].y) {
+                gameState = 'GAMEOVER';
+            }
+
+            // 移除屏幕外的障碍
+            if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i, 1);
+        }
+    }
+
+    // --- 绘制逻辑 ---
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 绘制恐龙
+        if (dinoImg.complete && dinoImg.naturalWidth !== 0) {
+            ctx.drawImage(dinoImg, dino.x, dino.y, dino.width, dino.height);
+        } else {
+            ctx.fillStyle = '#2ecc71'; // 默认绿色方块
+            ctx.fillRect(dino.x, dino.y, dino.width, dino.height);
+        }
+
+        // 绘制随机高度火柱
+        obstacles.forEach(opt => {
+            ctx.fillStyle = opt.color;
+            ctx.fillRect(opt.x, opt.y, opt.w, opt.h);
+            // 给柱子加个黄色顶端，看起来更像“火柱”
+            ctx.fillStyle = '#f1c40f';
+            ctx.fillRect(opt.x, opt.y, opt.w, 6);
+        });
+
+        // 绘制 UI 遮罩
+        if (gameState === 'WAITING' || gameState === 'GAMEOVER') {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#2ecc71';
+            const btnW = 240, btnH = 60;
+            ctx.fillRect(canvas.width/2 - btnW/2, canvas.height/2 - btnH/2, btnW, btnH);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 22px Arial';
+            ctx.textAlign = 'center';
+            const msg = gameState === 'WAITING' ? '点击/空格 开始游戏' : '游戏结束 - 点击重开';
+            ctx.fillText(msg, canvas.width/2, canvas.height/2 + 8);
+        }
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+</script>
+</body>
+</html>
