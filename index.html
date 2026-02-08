@@ -3,30 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dino Jump - 随机障碍版</title>
+    <title>Dino Jump - 手机上传优化版</title>
     <style>
         body { 
             margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; 
             height: 100vh; background-color: #1a1a1a; font-family: sans-serif; color: white; overflow: hidden; touch-action: none;
         }
-        #gameContainer { position: relative; width: 95vw; max-width: 800px; aspect-ratio: 8/3; }
-        canvas { background-color: #fff; width: 100%; height: 100%; border-radius: 8px; display: block; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
-        .controls { margin-top: 20px; text-align: center; }
-        #scoreDisplay { font-size: 32px; color: #2ecc71; margin: 10px 0; font-weight: bold; }
-        .upload-label { background: #3498db; padding: 12px 20px; border-radius: 5px; cursor: pointer; display: inline-block; font-size: 14px; }
-        #fileInput { display: none; }
+        #scoreDisplay { font-size: 32px; color: #2ecc71; margin-bottom: 10px; font-weight: bold; }
+        
+        #gameContainer { position: relative; width: 95vw; max-width: 800px; aspect-ratio: 8/3; z-index: 5; }
+        canvas { background-color: #fff; width: 100%; height: 100%; border-radius: 8px; display: block; }
+
+        /* 底部控制区：确保在最上层 */
+        .controls { 
+            margin-top: 25px; 
+            z-index: 999; 
+            position: relative; 
+            pointer-events: auto; /* 确保可点击 */
+        }
+        
+        .upload-label { 
+            background: #3498db; 
+            color: white;
+            padding: 15px 25px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            display: inline-block; 
+            font-size: 16px; 
+            font-weight: bold;
+            box-shadow: 0 4px 0 #2980b9;
+            active-transform: translateY(2px);
+            -webkit-tap-highlight-color: transparent;
+        }
+        .upload-label:active { transform: translateY(2px); box-shadow: 0 2px 0 #2980b9; }
+        
+        #fileInput { 
+            display: block; 
+            position: absolute; 
+            opacity: 0; 
+            width: 1px; height: 1px; 
+        }
+
+        .hint { font-size: 12px; color: #666; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
 
 <div id="scoreDisplay">0</div>
+
 <div id="gameContainer">
     <canvas id="gameCanvas"></canvas>
 </div>
 
 <div class="controls">
-    <label for="fileInput" class="upload-label">📷 换个角色图片</label>
+    <label for="fileInput" class="upload-label">📂 手机选图换角色</label>
     <input type="file" id="fileInput" accept="image/*">
+    <p class="hint">若无反应，请尝试点击文字正中心</p>
 </div>
 
 <script>
@@ -38,32 +70,43 @@
     canvas.width = 800;
     canvas.height = 300;
 
-    // --- 资源加载 ---
     let dinoImg = new Image();
     dinoImg.src = 'dino.png'; 
 
+    // --- 修复手机上传逻辑 ---
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => { dinoImg.src = ev.target.result; };
-            reader.readAsDataURL(file);
-        }
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const tempImg = new Image();
+            tempImg.onload = () => {
+                dinoImg = tempImg;
+                if (gameState !== 'PLAYING') draw(); // 没开始时也更新预览
+            };
+            tempImg.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
     });
 
-    // --- 游戏变量 ---
+    // --- 游戏逻辑 (保持之前的随机高度版) ---
     let score = 0, gameSpeed = 6, frame = 0, gameState = 'WAITING';
-    let nextObstacleFrame = 100; // 下一个障碍物出现的随机帧数
+    let nextObstacleFrame = 100;
     const obstacles = [];
     const dino = { x: 80, y: 200, width: 60, height: 60, dy: 0, jumpForce: 13, gravity: 0.8, jumpCount: 0, maxJumps: 2 };
 
-    // --- 核心交互逻辑 ---
     function handleAction(e) {
-        if (e && e.code === 'Space') e.preventDefault();
-        if (e && e.type === 'touchstart') e.preventDefault();
+        if (e && e.type === 'touchstart' && e.target.id !== 'fileInput') {
+            // 只有点在非上传按钮区域才触发游戏逻辑
+            e.preventDefault();
+        }
 
         if (gameState === 'WAITING' || gameState === 'GAMEOVER') {
-            resetGame();
+            // 只有当点击的是 Canvas 区域时才开始，防止点上传按钮时误触发开始
+            if (e.target.id === 'gameCanvas' || e.type === 'keydown') {
+                resetGame();
+            }
         } else if (gameState === 'PLAYING') {
             if (dino.jumpCount < dino.maxJumps) {
                 dino.dy = -dino.jumpForce;
@@ -72,9 +115,10 @@
         }
     }
 
-    window.addEventListener('touchstart', handleAction, { passive: false });
-    window.addEventListener('mousedown', (e) => { if (e.button === 0) handleAction(e); });
-    window.addEventListener('keydown', (e) => { if (e.code === 'Space') handleAction(e); });
+    // 分离监听：Canvas 负责游戏，Window 负责全局
+    canvas.addEventListener('touchstart', handleAction, { passive: false });
+    canvas.addEventListener('mousedown', handleAction);
+    window.addEventListener('keydown', (e) => { if(e.code === 'Space') handleAction(e); });
 
     function resetGame() {
         score = 0; gameSpeed = 6; obstacles.length = 0;
@@ -83,85 +127,56 @@
         gameState = 'PLAYING';
     }
 
-    // --- 游戏更新逻辑 ---
     function update() {
         if (gameState !== 'PLAYING') return;
         frame++;
         score += 0.15;
         scoreDisplay.innerText = Math.floor(score);
-        gameSpeed += 0.001; // 速度缓慢提升
+        gameSpeed += 0.0015;
 
-        // 恐龙重力模拟
         dino.dy += dino.gravity;
         dino.y += dino.dy;
 
-        // 落地碰撞
         if (dino.y + dino.height > canvas.height) {
             dino.y = canvas.height - dino.height;
             dino.dy = 0;
             dino.jumpCount = 0;
         }
 
-        // --- 随机生成逻辑 ---
         if (frame >= nextObstacleFrame) {
-            // 随机高度：30px 到 100px 之间
-            const randomHeight = Math.floor(Math.random() * 70) + 30;
-            // 随机宽度：20px 到 40px 之间
-            const randomWidth = Math.floor(Math.random() * 20) + 20;
-            
-            obstacles.push({
-                x: canvas.width,
-                y: canvas.height - randomHeight,
-                w: randomWidth,
-                h: randomHeight,
-                color: '#e74c3c'
-            });
-
-            // 随机分布：生成下一个障碍物的间隔（受游戏速度影响，越来越快）
-            const minGap = Math.max(40, 90 - gameSpeed * 2);
-            const maxGap = Math.max(100, 180 - gameSpeed * 2);
-            nextObstacleFrame = frame + Math.floor(Math.random() * (maxGap - minGap)) + minGap;
+            const h = Math.floor(Math.random() * 70) + 30;
+            obstacles.push({ x: canvas.width, y: canvas.height - h, w: 30, h: h });
+            nextObstacleFrame = frame + Math.floor(Math.random() * 50) + 50;
         }
 
-        // 移动与碰撞检测
         for (let i = obstacles.length - 1; i >= 0; i--) {
             obstacles[i].x -= gameSpeed;
-
-            // 精细碰撞检测 (为了公平，边缘留出 8px 的容错)
             if (dino.x + 12 < obstacles[i].x + obstacles[i].w &&
                 dino.x + dino.width - 12 > obstacles[i].x &&
                 dino.y + 8 < obstacles[i].y + obstacles[i].h &&
                 dino.y + dino.height - 8 > obstacles[i].y) {
                 gameState = 'GAMEOVER';
             }
-
-            // 移除屏幕外的障碍
             if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i, 1);
         }
     }
 
-    // --- 绘制逻辑 ---
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // 绘制恐龙
         if (dinoImg.complete && dinoImg.naturalWidth !== 0) {
             ctx.drawImage(dinoImg, dino.x, dino.y, dino.width, dino.height);
         } else {
-            ctx.fillStyle = '#2ecc71'; // 默认绿色方块
+            ctx.fillStyle = '#2ecc71';
             ctx.fillRect(dino.x, dino.y, dino.width, dino.height);
         }
-
-        // 绘制随机高度火柱
+        ctx.fillStyle = '#e74c3c';
         obstacles.forEach(opt => {
-            ctx.fillStyle = opt.color;
             ctx.fillRect(opt.x, opt.y, opt.w, opt.h);
-            // 给柱子加个黄色顶端，看起来更像“火柱”
             ctx.fillStyle = '#f1c40f';
             ctx.fillRect(opt.x, opt.y, opt.w, 6);
+            ctx.fillStyle = '#e74c3c';
         });
 
-        // 绘制 UI 遮罩
         if (gameState === 'WAITING' || gameState === 'GAMEOVER') {
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -171,7 +186,7 @@
             ctx.fillStyle = 'white';
             ctx.font = 'bold 22px Arial';
             ctx.textAlign = 'center';
-            const msg = gameState === 'WAITING' ? '点击/空格 开始游戏' : '游戏结束 - 点击重开';
+            const msg = gameState === 'WAITING' ? '点击画面开始游戏' : '游戏结束 - 点击重开';
             ctx.fillText(msg, canvas.width/2, canvas.height/2 + 8);
         }
     }
